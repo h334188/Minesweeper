@@ -1,23 +1,39 @@
 using TMPro;
 using UnityEngine;
+using UnityEngine.Tilemaps;
 
 public class Game : MonoBehaviour {
 
+    [Header("Default Setting")]
     public int width = 16;
     public int height = 16;
     public int mineCount = 32;
+    public TextMeshProUGUI mineCountText;
 
     private Board board;
     private Cell[,] state;
 
-    private bool gameover;
-
-    private bool isWin;
+    [Header("Game Over Tip")]
     public TextMeshProUGUI gameOverText;
+    private bool gameover;// 游戏是否结束
+    private bool isWin;// 是否胜利（用于控制Tip显示文本）
 
-    public TextMeshProUGUI mineCountText;
+    [Header("New Setting")]
+    public GameObject newSettingInput;
+    public TMP_InputField newWidthCount;
+    public TMP_InputField newHeightCount;
     public TMP_InputField newMineCount;
     private bool control = true;
+
+    private float defaultWidth = 16f;
+    private float defaultHeight = 16f;
+    private float defaultSize = 10f;
+    private Tilemap tilemap;
+    private int maxWidth = 25;
+    private int maxHeight = 25;
+
+    private float clickTime = 0;
+    private Vector3Int clickPosition = Vector3Int.zero;
 
     // 在编辑器上更新某些值时自动调用（可用于检测值是否有效）
     private void OnValidate() {
@@ -26,10 +42,12 @@ public class Game : MonoBehaviour {
 
     private void Awake() {
         board = GetComponentInChildren<Board>();
+        tilemap = GetComponentInChildren<Tilemap>();
     }
 
     // 在游戏对象运行上的第一帧调用
     private void Start() {
+        clickTime = Time.time;// 0
         NewGame();
     }
 
@@ -44,6 +62,11 @@ public class Game : MonoBehaviour {
         GenerateNumbers();
 
         Camera.main.transform.position = new Vector3(width / 2f, height / 2f, -10);
+        //float mainCameraSize = Camera.main.orthographicSize;
+        //Debug.Log(defaultSize + "@@@" + width + "@@@" + defaultWidth);
+        Camera.main.orthographicSize = 
+            Mathf.Max(width / defaultWidth * defaultSize, height / defaultHeight * defaultSize);
+        //Debug.Log(Camera.main.orthographicSize);
         board.Draw(state);
     }
 
@@ -132,17 +155,20 @@ public class Game : MonoBehaviour {
         }
 
         if (Input.GetKeyDown(KeyCode.Space)) {
-            newMineCount.gameObject.SetActive(true);
+            newSettingInput.gameObject.SetActive(true);
             control = false;
         }
         if (Input.GetKeyDown(KeyCode.KeypadEnter) || Input.GetKeyDown(KeyCode.Return)) {
-            mineCount = Mathf.Clamp(int.Parse(newMineCount.text), 0, width * height);
-            newMineCount.gameObject.SetActive(false);
+            //Debug.Log(newMineCount.text);
+            newSettingInput.gameObject.SetActive(false);
             control = true;
-            NewGame();
+            if (IsChangeSetting()) {
+                tilemap.ClearAllTiles();
+                NewGame();
+            }
         }
         if (Input.GetKeyDown(KeyCode.Escape)) {
-            newMineCount.gameObject.SetActive(false);
+            newSettingInput.gameObject.SetActive(false);
             control = true;
         }
 
@@ -151,9 +177,96 @@ public class Game : MonoBehaviour {
             if (Input.GetMouseButtonDown(1)) {
                 Flag();
             } else if (Input.GetMouseButtonDown(0)) {
-                Reveal();
+                //Debug.Log(clickTime + "@@@" + Time.time);
+                if (Time.time - clickTime <= .2f 
+                    && IsSamePosition(clickPosition, MousePositionToCellPosition())
+                    && CheckCell(clickPosition.x, clickPosition.y)) {
+                    Debug.Log("double click the same revealed cell");
+
+                    QuickReveal(clickPosition.x, clickPosition.y);
+                }
+                clickTime = Time.time;
+                clickPosition = MousePositionToCellPosition();
+
+                Reveal(clickPosition.x, clickPosition.y);
             }
         }
+    }
+
+    private void QuickReveal(int cellX, int cellY) {
+        for (int adjacentX = -1; adjacentX <= 1; adjacentX++) {
+            for (int adjacentY = -1; adjacentY <= 1; adjacentY++) {
+                int x = cellX + adjacentX;
+                int y = cellY + adjacentY;
+
+                if (adjacentX == 0 && adjacentY == 0 || GetCell(x, y).flagged) {
+                    continue;
+                }
+
+                // 掀开x y的格子
+                Reveal(x, y);
+            }
+        }
+    }
+
+    private bool CheckCell(int cellX, int cellY) {
+        Cell cell = GetCell(cellX, cellY);
+        if (!cell.revealed || cell.number != CountFlaggedMines(cellX, cellY)) {  
+            return false;
+        }
+        return true;
+    }
+
+    private int CountFlaggedMines(int cellX, int cellY) {
+        int count = 0;
+
+        for (int adjacentX = -1; adjacentX <= 1; adjacentX++) {
+            for (int adjacentY = -1; adjacentY <= 1; adjacentY++) {
+                if (adjacentX == 0 && adjacentY == 0) {
+                    continue;
+                }
+
+                int x = cellX + adjacentX;
+                int y = cellY + adjacentY;
+
+                if (GetCell(x, y).flagged) {
+                    count++;
+                }
+            }
+        }
+
+        return count;
+    }
+
+    private bool IsSamePosition(Vector3Int position1, Vector3Int position2) {
+        return position1.x == position2.x && position1.y == position2.y;
+    }
+
+    private Vector3Int MousePositionToCellPosition() {
+        Vector3 worldPosition = Camera.main.ScreenToWorldPoint(Input.mousePosition);
+        Vector3Int cellPosition = board.tilemap.WorldToCell(worldPosition);// * V3Int
+        return cellPosition;
+    }
+
+    /// <summary>
+    /// 获取用户所输入的最新参数
+    /// </summary>
+    /// <returns>是否有输入</returns>
+    private bool IsChangeSetting() {
+        bool flag = false;
+        if (newMineCount.text != "") {
+            mineCount = Mathf.Clamp(int.Parse(newMineCount.text), 1, width * height);
+            newMineCount.text = "";
+            flag = true;
+        }
+        if (newHeightCount.text != "" && newWidthCount.text != "") {
+            height = Mathf.Clamp(int.Parse(newHeightCount.text), 2, maxHeight);
+            width = Mathf.Clamp(int.Parse(newWidthCount.text), 2, maxWidth);
+            newHeightCount.text = "";
+            newWidthCount.text = "";
+            flag = true;
+        }
+        return flag;
     }
 
     private void Flag() {
@@ -173,10 +286,8 @@ public class Game : MonoBehaviour {
         mineCountText.text = currentMine.ToString();
     }
 
-    private void Reveal() {
-        Vector3 worldPosition = Camera.main.ScreenToWorldPoint(Input.mousePosition);
-        Vector3Int cellPosition = board.tilemap.WorldToCell(worldPosition);// * V3Int
-        Cell cell = GetCell(cellPosition.x, cellPosition.y);
+    private void Reveal(int cellX, int cellY) {
+        Cell cell = GetCell(cellX, cellY);
 
         if (cell.type == Cell.Type.Invalid || cell.revealed || cell.flagged) {
             return;
@@ -194,7 +305,7 @@ public class Game : MonoBehaviour {
 
             default:
                 cell.revealed = true;
-                state[cellPosition.x, cellPosition.y] = cell;
+                state[cellX, cellY] = cell;
                 CheckWinCondition();
                 break;
         }

@@ -3,7 +3,7 @@ using UnityEngine.Tilemaps;
 
 public class Board : MonoBehaviour {
 
-    public Tilemap tilemap { get; private set; } 
+    public Tilemap tilemap { get; set; } 
 
     public Tile tileUnknown;
     public Tile tileEmpty;
